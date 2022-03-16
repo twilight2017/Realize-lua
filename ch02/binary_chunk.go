@@ -82,6 +82,6 @@ type LocVars{
 func Undump(data []byte) *Prototype{
 	reader := &reader(data)
 	reader.checkHeader()//校验头部
-	read.readByte()  //跳过Upvalue数量
+	reader.readByte()  //跳过Upvalue数量
 	return reader.readProto("")//读取函数原型
 }
