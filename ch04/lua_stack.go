@@ -8,7 +8,7 @@ type luaStack struct {
 }
 
 //定义全部接口
-type LuaState interface{
+type luaState interface{
 	/*basic stack manipulation*/
 	GetTop() int
 	AbsIndex(idx int) int
@@ -97,4 +97,34 @@ func (self *luaStack) set(idx int, val luaValue){
 		return
 	}
 	panic("invalid index!")
+}
+
+//reverse
+func (self *luaStack) reverse(from, to int){
+	slots := self.slots
+	for from < to {
+		slots[from], slots[to] = slots[to], slots[from]
+		from ++
+		to--
+	}
+}
+
+//将栈顶索引设为指定值，设为0则相当于清空栈
+//指定值大于当前栈顶索引，相当于推入多个nil值
+func (self *luaState) SetTop(idx int){
+	newTop := self.stack.absIndex(idx) //先获得绝对值
+	if newTop < 0{
+		panic("stack underflow!")
+	}
+
+	n := self.stack.top - newTop //需要插入nil值的数量
+	if n >0{
+		for i:=0;i<n;i++{
+			self.stack.pop()
+		}
+	}else if n < 0{
+        for i := 0; i> n; i--{
+			self.stack.push(nil)
+		}
+	}
 }
