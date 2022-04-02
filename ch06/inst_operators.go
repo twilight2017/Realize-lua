@@ -112,7 +112,7 @@ func concat(i Instruction, vm LuaVM) {
 		vm.PushValue(i)
 	}
 	vm.Contact(n)
-	vm.Repalce(a)
+	vm.Replace(a)
 }
 
 //比较指令：比较寄存器或常量表里的两个值（索引分别由操作数B和C指定）
@@ -141,4 +141,66 @@ func lt(i Instruction, vm LuaVM) {
 //<=
 func le(i, Instruction, vm LuaVM) {
 	_compare(i, vm, LUA_OPLE)
+}
+
+func not(i Instruction, vm LuaVM) {
+	a, b, _ := i.ABC()
+	a += 1
+	b += 1
+
+	vm.PushBoolean(!vm.ToBoolean(b))
+	vm.Replace(a)
+
+}
+
+//testset 判断寄存器B（索引由操作数B指定）中的值转换为布尔值之后是否和操作数C表示的布尔值一致
+//一致：则将寄存器B的值复制到寄存器A（索引由操作数A指定）
+//否则跳过下一条指令
+func testSet(i Instruction, vm LuaVM) {
+	a, b, c = i.ABC()
+	a += 1
+	b += 1
+	if vm.ToBoolean(b) == (c != 0) {
+		vm.Copy(b, a)
+	} else {
+		vm.AddPC(1)
+	}
+}
+
+//test 判断寄存器A（索引由操作数A指定）中的值转换为布尔值之后是否和操作数C的布尔值一致，如果一致，则跳过下一条指令
+func test(i Instruction, vm LuaVM) {
+	a, _, c = i.ABC()
+	a += 1
+
+	if vm.ToBoolean(a) == (c != 0) {
+		vm.AddPC(1)
+	}
+}
+
+func forPrep(i Instruction, vm LuaVM) {
+	a, sBx = i.AsBx()
+
+	a += 1
+	vm.PushValue(a)
+	vm.PushValue(a + 2)
+	vm.Arith(LUA_OPSUB)
+	vm.Replace(a)
+	vm.AddPC(sBx)
+}
+
+func forLoop(i Instruction, vm LuaVM) {
+	a, sBx = i.AsBx()
+
+	a += 1
+	vm.PushValue(a + 2)
+	vm.PushValue(a)
+	vm.Arith(LUA_OPADD)
+	vm.Replace(a)
+
+	isPositiveStep := vm.ToNumber(a+2) >= 0
+	if isPositiveStep && vm.Compare(a, a+1, LUA_OPLE) ||
+		!isPositiveStep && vm.Compare(a+1, a, LUA_OPLE) {
+		vm.AddPC(sBx) //pc += sBx
+		vm.Copy(a, a+3)
+	}
 }
