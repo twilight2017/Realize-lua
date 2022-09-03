@@ -10,10 +10,3 @@ func (self *luaState) Len(idx int) {
 		panic("length error!")
 	}
 }
-
-class A:
-	a = 123
-
-
-def foo():
-    a = []
