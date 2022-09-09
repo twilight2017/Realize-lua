@@ -7,11 +7,22 @@ import "strconv"
 import "strings"
 
 var reOpeningLongBracket = regexp.MustCompile(`^\[=*\[`)
+//用正则表达式来处理换行符序列
+var reNewLine = regexp.MustCompile("\r\n|\n\r|\n|\r")
+var reShortStr = regexp.MustCompile("")
+var reDecEscapeSeq = regexp.MustCompile(`^\\[0-9]{1,3}`)
+var reHexEscapeSeq = regexp.MustCompile(`^\\x[0-9a-fA-F]{2}`)
+var reUnicodeEscapeSeq = regexp.MustCompile(`^\\u\{[0-9a-fA-F]+\}`)
+var reNumber = regexp.MustCompile(``)
+var reIdentifier = regexp.MustCompile(`^[_\d\w]+`)
 
 type Lexer struct {
 	chunk     string //源代码
 	chunkName string //源文件名
 	line      int    //当前行号
+	nextToken string
+	nextTokenKind int
+	nextTokenLine int
 }
 
 func NewLexer(chunk, chunkName string) *Lexer {
@@ -19,6 +30,14 @@ func NewLexer(chunk, chunkName string) *Lexer {
 }
 
 func (self *Lexer) NextToken() (line, kind int, token string) {
+	if self.nextTokenLine > 0{
+		line= self.nextTokenLine
+		kind = self.nextTokenKind
+		token = self.nextToken
+		self.line = self.nextTokenLine
+		self.nextTokenLine = 0
+		return
+	}
 	switch self.chunk[0] {
 	case ';':
 		self.next(1)
@@ -139,7 +158,40 @@ func (self *Lexer) NextToken() (line, kind int, token string) {
 		}
 	case '\'', '"':
 		return self.line, TOKEN_STRING, self.scanLongString()
+	switch self.chunk[0]{
 
+	}
+	c := self.chunk[0]
+	if c == '.' || isDigit(c){
+		token := self.scanNumber()
+		return self.line, TOKEN_NUMBER, token
+	}
+	if c == '_' || isLatter(c){
+		token := self.scanIdentifier()
+		if kind, found := keywords[token]; found{
+			return line, kind, token
+		}else{
+			return line, TOKEN_IDENTIFIER,token
+		}
+	}
+	self.error("unexpected symbol near %q", c)
+}
+}
+
+func isLatter(c byte) bool{
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func(self *Lexer) scanIdentifier() string{
+	return self.scan(reIdentifier)
+}
+
+//判断一个字符是否是数字
+func isDigit(c byte) bool{
+	if c >= '0' && c <= '9'{
+		return true
+	}
+	return false
 }
 
 func (self *Lexer) skipWhiteSpace() {
@@ -158,7 +210,7 @@ func (self *Lexer) skipWhiteSpace() {
 			break
 		}
 	}
-}
+	}
 
 func (self *Lexer) test(s string) bool {
 	return strings.HasPrefix(self.chunk, s)
@@ -196,4 +248,154 @@ func (self *Lexer) skipComment() {
 	for len(self.chunk) > 0 && !isNewLine(self.chunk[0]) {
 		self.next(1)
 	}
+}
+
+func (self *Lexer)scanLongString() string{
+	openingLongBracket := reOpeningLongBracket.FindString(self.chunk)
+	if openingLongBracket == ""{
+		self.error("invalid long string delimiter near '%s'"), self.chunk[0:2]
+	}
+
+	closingLongBracket := strings.Replace(openingLongBracket, "[", "]", -1)
+	closingLongBracketIndex := strings.Index(self.chunk, closingLongBracket)
+	if closingLongBracketIndex < 0{
+		self.error("unfinished long string or comment")
+	}
+
+	str := self.chunk[len(openingLongBracket):closingLongBracketIndex]
+	self.next(closingLongBracketIndex + len(closingLongBracket))
+
+	str = reNewLine.ReplaceAllString(str, "\n")
+	self.line += strings.Count(str, "\n")
+	if len(str) > 0 && str[0] == '\n'{
+		str = str[1:]
+	}
+	return str
+}
+
+func (self *Lexer) error(f string, a...interface{}){
+	err := fmt.Sprintf(f, a...)
+	err = fmt.Sprintf("%s:%d: %s", self.chunkName, self.line, err)
+	panic(err)
+}
+
+func (self *Lexer) scanShortString() string{
+	if str := reShortStr.FindString(self.chunk); str != ""{
+		self.next(len(str))
+		str = str[1:len(str)-1]
+		if strings.Index(str, `\`) >= 0{
+			self.line += len(reNewLine.FindAllString(str, -1))
+			str = self.escape(str)
+		}
+		return str
+	}
+	self.error("unfinished string")
+	return ""
+}
+
+func (self *Lexer)escape(str string) string{
+	var buf bytes.Buffer
+
+	for len(str) > 0{
+		if str[0] != '\\'{
+			buf.WriteByte(str[0])
+			str = str[1:]
+			continue
+		}
+		if len(str) == 1{
+			self.error("unfinished string")
+		}
+		switch str[1]{
+		case 'a': buf.WriteByte('\a'); str = str[2:];continue
+		case 'b': buf.WriteByte('\b'); str = str[2:];continue
+		case 'f': buf.WriteByte('\f'); str = str[2:];continue
+		case 'n':buf.WriteByte('\n');str=str[2:];continue
+		case '\n': buf.WriteByte('\n');str = str[2:];continue
+		case 'r': buf.WriteByte('\r'); str = str[2:];continue
+		case 't': buf.WriteByte('\t'); str = str[2:];continue
+		case 'v': buf.WriteByte('\v'); str = str[2:];continue
+		case '"': buf.WriteByte('"'); str = str[2:];continue
+		case '\'': buf.WriteByte('\''); str = str[2:];continue
+		case '\\': buf.WriteByte('\\'); str = str[2:];continue
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			if found := reDecEscapeSeq.FindString(str); found != ""{
+				d, _ := strconv.ParseInt(found[1:], 10, 32)
+				if d <= 0xFF{
+					buf.WriteByte(byte(d))
+					str = str[len(found):]
+					continue
+				}
+				self.error("decimal escape too large near '%s'", found)
+			}
+		case 'x':
+			if found := reHexEscapeSeq.FindString(str); found != ""{
+				d, _ := strconv.ParseInt(found[2:], 16,32)
+				buf.WriteByte(byte(d))
+				str = str[len(found):]
+				continue
+			}
+		case 'u':
+			if found := reUnicodeEscapeSeq.FindString(str); found != ""{
+				d, err := strconv.ParseInt(found[3:len(found)-1], 16, 32)
+				if err == nil && d <= 0x10FFFF{
+					buf.WriteRune(rune(d))
+					str = str[len(found):]
+					continue
+				}
+				self.error("UTF-8 value too large near '%s'", found)
+			}
+		case 'z':
+			str = str[2:]
+			for len(str) >0 && isWhiteSpace(str[0]){
+				str = str[1:]
+			}
+			continue
+		}
+		self.error("invalid escape sequence near '\\%c'", str[1])
+	}
+	return buf.String()
+}
+
+//直接调用scan方法
+func (self *Lexer) scanNumber() string{
+	return self.scan(reNumber)
+}
+
+func(self *Lexer) scan(re *regexp.Regexp) string{
+	if token := re.FindString(self.chunk); token != ""{
+		self.next(len(token))
+		return token
+	}
+	panic("unreachable")
+}
+
+func (self *Lexer) LookAhead() int{
+	if self.nextTokenLine > 0{
+		return self.nextTokenKind //直接返回token的类型
+	}
+	//缓存里提取不到下一个Token时调用NextToken()方法提取下一个Token并缓存
+	current_line = self.line
+	line, kind, token := self.NextToken()
+	self.line = current_line
+	self.nextTokenLine = line
+	self.nextTokenKind = kind
+	self.nextToken= token
+	return kind
+}
+
+func (self *Lexer) NextTokenOfKind(kind int)(line int, token string){
+	line, _kind, token := self.NextToken()
+	if kind != _kind{
+		self.error("syntax error near '%s'", token)
+	}
+	return line, token
+}
+
+func (self *Lexer) NextIdentifier() (line int, token string){
+	return self.NextTokenOfKind(TOKEN_IDENTIFIER)
+}
+
+//返回当前行号
+func (self *Lexer) Line() int{
+	return self.line
 }
